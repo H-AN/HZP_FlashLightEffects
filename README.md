@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://swiftlys2.net/docs/" target="_blank">
-    <img src="https://opengraph.githubassets.com/1/swiftly-solution/swiftlys2" alt="SwiftlyS2" width="780" />
+    <img src="https://github.com/user-attachments/assets/d0316faa-c2d0-478f-a642-1e3c3651f1d4" alt="SwiftlyS2" width="780" />
   </a>
 </div>
 
