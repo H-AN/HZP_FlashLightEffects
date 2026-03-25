@@ -54,7 +54,7 @@ It supports separate human/zombie lighting profiles, special-zombie overrides, k
 ## Feature Overview
 
 - Press `F` to toggle flashlight.
-- Also registers `flashlight` and `swiftly_flashlight_toggle` for command/bind fallback.
+- Also registers `flashlight` and `forceflash` for command/bind fallback.
 - Player commands are self-only and cannot directly control other players.
 - Adds dedicated admin command `flash` with fuzzy name matching for forced control.
 - Applies separate profiles for `Human` and `Zombie`.
