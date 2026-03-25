@@ -54,7 +54,8 @@
 
 - 支持按 `F` 键直接切换手电筒。
 - 同时注册命令 `flashlight` 与 `swiftly_flashlight_toggle`（便于 `bind` 回退方案）。
-- 支持目标玩家切换：`@me` 或 `playerId`。
+- 普通玩家命令仅影响自己，不允许直接控制其他玩家。
+- 提供独立管理员命令 `flash`，支持模糊名字匹配后强制控制目标玩家。
 - 基于阵营应用不同光照配置：`Human` / `Zombie`。
 - 支持 `SpecialZombies` 按僵尸职业名覆盖配置（对接 HanZombiePlague API）。
 - 支持防抖时间窗口 `ToggleDebounceMs`，避免同一动作重复触发。
@@ -72,13 +73,13 @@
 ### 命令
 
 - `flashlight`
-当前发送者切换手电筒（游戏内玩家）。
-- `flashlight @me`
-当前发送者切换手电筒。
-- `flashlight <playerId>`
-指定玩家切换手电筒。
+仅当前发送者切换手电筒（不接收目标参数）。
 - `swiftly_flashlight_toggle`
-与 `flashlight` 相同，推荐用于按键绑定回退。
+与 `flashlight` 相同，推荐用于按键绑定回退或机器人自控输入。
+- `flash <玩家名|playerId> [on|off|toggle]`
+管理员命令，支持模糊字符串匹配玩家名，默认动作为 `on`。
+权限来源：`AdminCommandPermission`（支持用 `,` 分隔多个权限，命中任意一个即可）
+示例：`admin.dex` 或 `admin.dex,admin.other`
 
 ### 推荐按键回退
 
@@ -115,6 +116,7 @@ bind f swiftly_flashlight_toggle
 | `Enable` | bool | 插件总开关 |
 | `AllowBots` | bool | 是否允许机器人使用 |
 | `ToggleDebounceMs` | int | 切换防抖毫秒 |
+| `AdminCommandPermission` | string | 管理员命令权限串，`,` 分隔多个权限（命中任意一个即通过） |
 | `Human` | object | 人类光照配置 |
 | `Zombie` | object | 僵尸光照配置 |
 | `SpecialZombies` | array | 特感僵尸覆盖配置 |

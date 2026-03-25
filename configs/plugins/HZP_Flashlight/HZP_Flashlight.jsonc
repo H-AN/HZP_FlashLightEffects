@@ -3,6 +3,7 @@
     "Enable": true,
     "AllowBots": false,
     "ToggleDebounceMs": 150,
+    "AdminCommandPermission": "admin.dex",
     "Human": {
       "Enable": true,
       "Brightness": 9,

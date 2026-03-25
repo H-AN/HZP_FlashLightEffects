@@ -55,7 +55,8 @@ It supports separate human/zombie lighting profiles, special-zombie overrides, k
 
 - Press `F` to toggle flashlight.
 - Also registers `flashlight` and `swiftly_flashlight_toggle` for command/bind fallback.
-- Supports target resolution via `@me` or `playerId`.
+- Player commands are self-only and cannot directly control other players.
+- Adds dedicated admin command `flash` with fuzzy name matching for forced control.
 - Applies separate profiles for `Human` and `Zombie`.
 - Supports `SpecialZombies` profile override by zombie class name (HanZombiePlague API).
 - Has debounce window via `ToggleDebounceMs` to prevent duplicate toggles.
@@ -73,13 +74,13 @@ It supports separate human/zombie lighting profiles, special-zombie overrides, k
 ### Commands
 
 - `flashlight`
-Toggle flashlight for the command sender (in-game player).
-- `flashlight @me`
-Toggle flashlight for self.
-- `flashlight <playerId>`
-Toggle flashlight for a specific player.
+Toggle flashlight for the command sender only (no target arguments).
 - `swiftly_flashlight_toggle`
-Alias command, mainly for bind fallback.
+Alias command for bind fallback or bot self-control input.
+- `flash <playerName|playerId> [on|off|toggle]`
+Admin command with fuzzy player-name matching. Default action is `on`.
+Permission source: `AdminCommandPermission` (comma-separated, any one match passes)
+Example: `admin.dex` or `admin.dex,admin.other`
 
 ### Recommended bind fallback
 
@@ -116,6 +117,7 @@ bind f swiftly_flashlight_toggle
 | `Enable` | bool | Global plugin switch |
 | `AllowBots` | bool | Whether bots are allowed |
 | `ToggleDebounceMs` | int | Toggle debounce in milliseconds |
+| `AdminCommandPermission` | string | Admin-command permissions, split by `,` and accepted by any match |
 | `Human` | object | Human profile |
 | `Zombie` | object | Zombie profile |
 | `SpecialZombies` | array | Special zombie override list |

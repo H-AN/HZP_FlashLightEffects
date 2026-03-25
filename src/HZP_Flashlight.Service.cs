@@ -57,17 +57,17 @@ public sealed class HZP_Flashlight_Service
     public bool TryToggleForPlayer(IPlayer? player, out bool enabled, out string message)
     {
         enabled = false;
-        message = "Flashlight service is unavailable.";
+        message = "Flashlight.ErrorServiceUnavailable";
 
         if (!_config.Enable)
         {
-            message = "Flashlight is disabled in the config.";
+            message = "Flashlight.ErrorDisabledInConfig";
             return false;
         }
 
         if (!TryGetConnectedPlayer(player, out var connectedPlayer))
         {
-            message = "Player is not available for flashlight control.";
+            message = "Flashlight.ErrorPlayerUnavailableForControl";
             return false;
         }
 
@@ -78,7 +78,7 @@ public sealed class HZP_Flashlight_Service
         if (state.LastToggleTime > 0.0f && currentTime - state.LastToggleTime < debounceWindow)
         {
             enabled = state.Enabled;
-            message = state.Enabled ? "Flashlight is already enabled." : "Flashlight is already disabled.";
+            message = state.Enabled ? "Flashlight.StateAlreadyEnabled" : "Flashlight.StateAlreadyDisabled";
             return false;
         }
 
@@ -89,7 +89,7 @@ public sealed class HZP_Flashlight_Service
             state.Enabled = false;
             DestroyLightEntity(state);
             enabled = false;
-            message = "Flashlight disabled.";
+            message = "Flashlight.StateDisabled";
             return true;
         }
 
@@ -102,7 +102,7 @@ public sealed class HZP_Flashlight_Service
 
         if (!TryGetUsablePawn(connectedPlayer, requireAlive: true, out var pawn))
         {
-            message = "Player is not alive or does not have a usable pawn yet.";
+            message = "Flashlight.ErrorPawnUnavailable";
             return false;
         }
 
@@ -114,7 +114,77 @@ public sealed class HZP_Flashlight_Service
 
         state.Enabled = true;
         enabled = true;
-        message = "Flashlight enabled.";
+        message = "Flashlight.StateEnabled";
+        return true;
+    }
+
+    public bool TrySetForPlayer(IPlayer? player, bool shouldEnable, out bool changed, out string message)
+    {
+        changed = false;
+        message = "Flashlight.ErrorServiceUnavailable";
+
+        if (!_config.Enable)
+        {
+            message = "Flashlight.ErrorDisabledInConfig";
+            return false;
+        }
+
+        if (!TryGetConnectedPlayer(player, out var connectedPlayer))
+        {
+            message = "Flashlight.ErrorPlayerUnavailableForControl";
+            return false;
+        }
+
+        var state = GetOrCreateState(connectedPlayer);
+        var currentTime = _core.Engine.GlobalVars.CurrentTime;
+
+        if (!shouldEnable)
+        {
+            DestroyLightEntity(state);
+
+            if (!state.Enabled)
+            {
+                message = "Flashlight.StateAlreadyDisabled";
+                return true;
+            }
+
+            state.Enabled = false;
+            state.LastToggleTime = currentTime;
+            state.NextRetryTime = 0.0f;
+            changed = true;
+            message = "Flashlight.StateDisabled";
+            return true;
+        }
+
+        if (state.Enabled)
+        {
+            message = "Flashlight.StateAlreadyEnabled";
+            return true;
+        }
+
+        var resolvedProfile = ResolveEffectiveProfile(connectedPlayer);
+        if (!resolvedProfile.Profile.Enable)
+        {
+            message = GetProfileDisabledMessage(resolvedProfile.Faction);
+            return false;
+        }
+
+        if (!TryGetUsablePawn(connectedPlayer, requireAlive: true, out var pawn))
+        {
+            message = "Flashlight.ErrorPawnUnavailable";
+            return false;
+        }
+
+        if (!TryCreateFlashlightEntity(connectedPlayer, pawn, state, resolvedProfile, out message))
+        {
+            return false;
+        }
+
+        state.Enabled = true;
+        state.LastToggleTime = currentTime;
+        state.NextRetryTime = 0.0f;
+        changed = true;
+        message = "Flashlight.StateEnabled";
         return true;
     }
 
@@ -363,7 +433,7 @@ public sealed class HZP_Flashlight_Service
         ResolvedFlashlightProfile resolvedProfile,
         out string errorMessage)
     {
-        errorMessage = "Failed to create a usable flashlight entity on this server.";
+        errorMessage = "Flashlight.ErrorCreateEntityFailed";
         DestroyLightEntity(state);
 
         CBarnLight? light;
@@ -380,7 +450,7 @@ public sealed class HZP_Flashlight_Service
 
         if (light is null || !light.IsValid)
         {
-            errorMessage = $"Server could not create '{FlashlightDesignerName}'.";
+            errorMessage = "Flashlight.ErrorCreateEntityUnavailable";
             return false;
         }
 
@@ -500,8 +570,8 @@ public sealed class HZP_Flashlight_Service
     private static string GetProfileDisabledMessage(FlashlightFaction faction)
     {
         return faction == FlashlightFaction.Zombie
-            ? "Zombie flashlight is disabled in the config."
-            : "Human flashlight is disabled in the config.";
+            ? "Flashlight.ErrorProfileDisabledZombie"
+            : "Flashlight.ErrorProfileDisabledHuman";
     }
 
     private static int GetProfileHash(HZP_Flashlight_ProfileConfig profile)

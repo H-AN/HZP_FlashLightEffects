@@ -8,6 +8,8 @@ public sealed class HZP_Flashlight_Config
 
     public int ToggleDebounceMs { get; set; } = 150;
 
+    public string AdminCommandPermission { get; set; } = "hzp.flashlight.admin";
+
     public HZP_Flashlight_ProfileConfig Human { get; set; } = HZP_Flashlight_ProfileConfig.CreateHumanDefaults();
 
     public HZP_Flashlight_ProfileConfig Zombie { get; set; } = HZP_Flashlight_ProfileConfig.CreateZombieDefaults();
@@ -21,6 +23,7 @@ public sealed class HZP_Flashlight_Config
             Enable = Enable,
             AllowBots = AllowBots,
             ToggleDebounceMs = ToggleDebounceMs,
+            AdminCommandPermission = AdminCommandPermission,
             Human = (Human ?? HZP_Flashlight_ProfileConfig.CreateHumanDefaults()).Clone(),
             Zombie = (Zombie ?? HZP_Flashlight_ProfileConfig.CreateZombieDefaults()).Clone(),
             SpecialZombies = SpecialZombies?.Select(group => group.Clone()).ToList() ?? []
