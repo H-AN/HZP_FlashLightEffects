@@ -1,0 +1,54 @@
+{
+  "HZP_FlashlightCFG": {
+    "Enable": true,
+    "AllowBots": false,
+    "ToggleDebounceMs": 150,
+    "Human": {
+      "Enable": true,
+      "Brightness": 9,
+      "Distance": 900,
+      "AttachmentDistance": 54,
+      "FovOrConeAngle": 55,
+      "Shadows": true,
+      "Attachment": "axis_of_intent",
+      "ColorR": 255,
+      "ColorG": 255,
+      "ColorB": 255,
+      "ColorA": 255,
+      "VisibleToTeammates": true
+    },
+    "Zombie": {
+      "Enable": true,
+      "Brightness": 10,
+      "Distance": 3000,
+      "AttachmentDistance": 54,
+      "FovOrConeAngle": 360,
+      "Shadows": true,
+      "Attachment": "axis_of_intent",
+      "ColorR": 255,
+      "ColorG": 32,
+      "ColorB": 32,
+      "ColorA": 255,
+      "VisibleToTeammates": false
+    },
+    "SpecialZombies": [
+      {
+        "Enable": true,
+        "Name": "轻型丧尸",
+        "FlashlightEnable": true,
+        "Brightness": 10,
+        "Distance": 3000.0,
+        "AttachmentDistance": 64.0,
+        "FovOrConeAngle": 360.0,
+        "Shadows": true,
+        "Attachment": "axis_of_intent",
+        "ColorR": 0,
+        "ColorG": 255,
+        "ColorB": 0,
+        "ColorA": 255,
+        "VisibleToTeammates": false
+      }
+
+    ]
+  }
+}
