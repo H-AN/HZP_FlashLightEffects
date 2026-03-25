@@ -1,0 +1,933 @@
+using System.Reflection;
+using HanZombiePlagueS2;
+using Microsoft.Extensions.Logging;
+using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.EntitySystem;
+using SwiftlyS2.Shared.Events;
+using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Natives;
+using SwiftlyS2.Shared.Players;
+using SwiftlyS2.Shared.SchemaDefinitions;
+
+namespace HZP_Flashlight;
+
+public sealed class HZP_Flashlight_Service
+{
+    private const string FlashlightDesignerName = "light_barn";
+    private const string FlashlightCookiePath = "materials/effects/lightcookies/flashlight.vtex";
+    private const int DirectLightMode = 3;
+    private const float BarnSoftX = 1.0f;
+    private const float BarnSoftY = 1.0f;
+    private const float BarnSkirt = 0.5f;
+    private const float BarnSkirtNear = 1.0f;
+    private const float BarnSizeExponent = 0.02f;
+
+    private static readonly Dictionary<Type, MethodInfo?> SetTransmitOneArgCache = [];
+    private static readonly Dictionary<Type, MethodInfo?> SetTransmitTwoArgCache = [];
+
+    private readonly ISwiftlyCore _core;
+    private readonly ILogger<HZP_Flashlight_Service> _logger;
+    private readonly Dictionary<ulong, FlashlightPlayerState> _statesBySessionId = [];
+    private readonly Dictionary<int, ulong> _sessionIdByPlayerId = [];
+    private readonly List<ulong> _staleSessions = [];
+
+    private HZP_Flashlight_Config _config = new();
+    private IHanZombiePlagueAPI? _zpApi;
+
+    public HZP_Flashlight_Service(ISwiftlyCore core, ILogger<HZP_Flashlight_Service> logger)
+    {
+        _core = core;
+        _logger = logger;
+    }
+
+    public void SetZombiePlagueApi(IHanZombiePlagueAPI? zpApi)
+    {
+        _zpApi = zpApi;
+    }
+
+    public void UpdateConfig(HZP_Flashlight_Config config)
+    {
+        _config = config.Clone();
+
+        if (!_config.Enable)
+        {
+            foreach (var state in _statesBySessionId.Values)
+            {
+                ForceDisableState(state);
+            }
+        }
+    }
+
+    public bool TryToggleForPlayer(IPlayer? player, out bool enabled, out string message)
+    {
+        enabled = false;
+        message = "Flashlight service is unavailable.";
+
+        if (!_config.Enable)
+        {
+            message = "Flashlight is disabled in the config.";
+            return false;
+        }
+
+        if (!TryGetConnectedPlayer(player, out var connectedPlayer))
+        {
+            message = "Player is not available for flashlight control.";
+            return false;
+        }
+
+        var state = GetOrCreateState(connectedPlayer);
+        var currentTime = _core.Engine.GlobalVars.CurrentTime;
+        var debounceWindow = Math.Max(0.01f, _config.ToggleDebounceMs / 1000.0f);
+
+        if (state.LastToggleTime > 0.0f && currentTime - state.LastToggleTime < debounceWindow)
+        {
+            enabled = state.Enabled;
+            message = state.Enabled ? "Flashlight is already enabled." : "Flashlight is already disabled.";
+            return false;
+        }
+
+        state.LastToggleTime = currentTime;
+
+        if (state.Enabled)
+        {
+            state.Enabled = false;
+            DestroyLightEntity(state);
+            enabled = false;
+            message = "Flashlight disabled.";
+            return true;
+        }
+
+        var resolvedProfile = ResolveEffectiveProfile(connectedPlayer);
+        if (!resolvedProfile.Profile.Enable)
+        {
+            message = GetProfileDisabledMessage(resolvedProfile.Faction);
+            return false;
+        }
+
+        if (!TryGetUsablePawn(connectedPlayer, requireAlive: true, out var pawn))
+        {
+            message = "Player is not alive or does not have a usable pawn yet.";
+            return false;
+        }
+
+        if (!TryCreateFlashlightEntity(connectedPlayer, pawn, state, resolvedProfile, out message))
+        {
+            enabled = false;
+            return false;
+        }
+
+        state.Enabled = true;
+        enabled = true;
+        message = "Flashlight enabled.";
+        return true;
+    }
+
+    public void HandleKeyStateChanged(IOnClientKeyStateChangedEvent @event)
+    {
+        if (!_config.Enable || !@event.Pressed)
+        {
+            return;
+        }
+
+        if (!string.Equals(@event.Key.ToString(), "F", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var player = _core.PlayerManager.GetPlayer(@event.PlayerId);
+        _ = TryToggleForPlayer(player, out _, out _);
+    }
+
+    public void HandlePlayerSpawn(int playerId)
+    {
+        if (!TryGetStateByPlayerId(playerId, out var state))
+        {
+            return;
+        }
+
+        ForceDisableState(state);
+    }
+
+    public void HandlePlayerDeath(int playerId)
+    {
+        if (!TryGetStateByPlayerId(playerId, out var state))
+        {
+            return;
+        }
+
+        ForceDisableState(state);
+    }
+
+    public void HandlePlayerInfected(IPlayer? infectedPlayer, string? zombieClassName)
+    {
+        if (infectedPlayer is null || !infectedPlayer.IsValid)
+        {
+            return;
+        }
+
+        if (!TryGetStateByPlayerId(infectedPlayer.PlayerID, out var state))
+        {
+            return;
+        }
+
+        ForceDisableState(state);
+
+        _logger.LogInformation(
+            "Disabled flashlight for infected player {PlayerId}. ZombieClass={ZombieClassName}.",
+            infectedPlayer.PlayerID,
+            string.IsNullOrWhiteSpace(zombieClassName) ? "unknown" : zombieClassName);
+    }
+
+    public void HandleClientDisconnected(int playerId)
+    {
+        if (!_sessionIdByPlayerId.Remove(playerId, out var sessionId))
+        {
+            return;
+        }
+
+        if (_statesBySessionId.Remove(sessionId, out var state))
+        {
+            DestroyLightEntity(state);
+        }
+    }
+
+    public void HandleMapLoad()
+    {
+        _staleSessions.Clear();
+    }
+
+    public void HandleMapUnload()
+    {
+        ClearAll(clearState: true);
+    }
+
+    public void HandleRoundReset()
+    {
+        foreach (var state in _statesBySessionId.Values)
+        {
+            ForceDisableState(state);
+        }
+    }
+
+    public void OnTick()
+    {
+        if (_statesBySessionId.Count == 0)
+        {
+            return;
+        }
+
+        var currentTime = _core.Engine.GlobalVars.CurrentTime;
+        _staleSessions.Clear();
+
+        foreach (var pair in _statesBySessionId)
+        {
+            var sessionId = pair.Key;
+            var state = pair.Value;
+
+            if (!state.Enabled)
+            {
+                DestroyLightEntity(state);
+                continue;
+            }
+
+            if (!TryResolvePlayerBySession(sessionId, out var player))
+            {
+                DestroyLightEntity(state);
+                _staleSessions.Add(sessionId);
+                continue;
+            }
+
+            state.PlayerId = player.PlayerID;
+            _sessionIdByPlayerId[player.PlayerID] = sessionId;
+
+            if (!_config.AllowBots && player.IsFakeClient)
+            {
+                ForceDisableState(state);
+                continue;
+            }
+
+            var resolvedProfile = ResolveEffectiveProfile(player);
+            if (!resolvedProfile.Profile.Enable)
+            {
+                ForceDisableState(state);
+                continue;
+            }
+
+            if (!TryGetUsablePawn(player, requireAlive: true, out var pawn))
+            {
+                DestroyLightEntity(state);
+                continue;
+            }
+
+            var profileHash = GetProfileHash(resolvedProfile.Profile);
+
+            if (TryGetTrackedLightEntity(state, out var trackedLight))
+            {
+                ApplyTransmitPolicy(trackedLight, player, resolvedProfile);
+
+                if (state.ActiveProfileHash == profileHash)
+                {
+                    continue;
+                }
+
+                DestroyLightEntity(state);
+            }
+
+            if (currentTime < state.NextRetryTime)
+            {
+                continue;
+            }
+
+            if (!TryCreateFlashlightEntity(player, pawn, state, resolvedProfile, out _))
+            {
+                state.NextRetryTime = currentTime + 0.5f;
+            }
+        }
+
+        foreach (var sessionId in _staleSessions)
+        {
+            if (_statesBySessionId.Remove(sessionId, out var state))
+            {
+                _sessionIdByPlayerId.Remove(state.PlayerId);
+            }
+        }
+    }
+
+    public void ClearAll(bool clearState)
+    {
+        foreach (var state in _statesBySessionId.Values)
+        {
+            ForceDisableState(state);
+        }
+
+        if (!clearState)
+        {
+            return;
+        }
+
+        _statesBySessionId.Clear();
+        _sessionIdByPlayerId.Clear();
+        _staleSessions.Clear();
+    }
+
+    private void ForceDisableState(FlashlightPlayerState state)
+    {
+        DestroyLightEntity(state);
+        state.Enabled = false;
+        state.NextRetryTime = 0.0f;
+    }
+
+    private FlashlightPlayerState GetOrCreateState(IPlayer player)
+    {
+        var sessionId = player.SessionId;
+
+        if (_sessionIdByPlayerId.TryGetValue(player.PlayerID, out var mappedSessionId) && mappedSessionId != sessionId)
+        {
+            if (_statesBySessionId.Remove(mappedSessionId, out var staleState))
+            {
+                DestroyLightEntity(staleState);
+            }
+        }
+
+        if (_statesBySessionId.TryGetValue(sessionId, out var state))
+        {
+            state.PlayerId = player.PlayerID;
+            _sessionIdByPlayerId[player.PlayerID] = sessionId;
+            return state;
+        }
+
+        state = new FlashlightPlayerState
+        {
+            SessionId = sessionId,
+            PlayerId = player.PlayerID
+        };
+
+        _statesBySessionId[sessionId] = state;
+        _sessionIdByPlayerId[player.PlayerID] = sessionId;
+        return state;
+    }
+
+    private bool TryGetStateByPlayerId(int playerId, out FlashlightPlayerState state)
+    {
+        state = null!;
+
+        if (!_sessionIdByPlayerId.TryGetValue(playerId, out var sessionId))
+        {
+            return false;
+        }
+
+        if (!_statesBySessionId.TryGetValue(sessionId, out var existingState))
+        {
+            return false;
+        }
+
+        state = existingState;
+        return true;
+    }
+
+    private bool TryCreateFlashlightEntity(
+        IPlayer player,
+        CCSPlayerPawn pawn,
+        FlashlightPlayerState state,
+        ResolvedFlashlightProfile resolvedProfile,
+        out string errorMessage)
+    {
+        errorMessage = "Failed to create a usable flashlight entity on this server.";
+        DestroyLightEntity(state);
+
+        CBarnLight? light;
+
+        try
+        {
+            light = _core.EntitySystem.CreateEntityByDesignerName<CBarnLight>(FlashlightDesignerName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to allocate flashlight entity '{DesignerName}'.", FlashlightDesignerName);
+            return false;
+        }
+
+        if (light is null || !light.IsValid)
+        {
+            errorMessage = $"Server could not create '{FlashlightDesignerName}'.";
+            return false;
+        }
+
+        try
+        {
+            ConfigureLightEntity(light, resolvedProfile.Profile);
+
+            using var entityKv = CreateFlashlightKeyValues();
+            light.DispatchSpawn(entityKv);
+
+            ApplyTransmitPolicy(light, player, resolvedProfile);
+            AttachLightToPawn(light, pawn, resolvedProfile.Profile);
+            EnableLight(light);
+
+            state.LightEntityIndex = light.Index;
+            state.LightDesignerName = FlashlightDesignerName;
+            state.NextRetryTime = 0.0f;
+            state.ActiveProfileHash = GetProfileHash(resolvedProfile.Profile);
+
+            _logger.LogInformation(
+                "Created flashlight entity {EntityIndex} using designer '{DesignerName}' for player {PlayerId}. Faction={Faction} ZombieClass={ZombieClassName}.",
+                light.Index,
+                FlashlightDesignerName,
+                player.PlayerID,
+                resolvedProfile.Faction,
+                resolvedProfile.ZombieClassName ?? "none");
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to initialize flashlight entity using designer '{DesignerName}' for player {PlayerId}.",
+                FlashlightDesignerName,
+                player.PlayerID);
+            TryDestroyEntity(light);
+            return false;
+        }
+    }
+
+    private ResolvedFlashlightProfile ResolveEffectiveProfile(IPlayer player)
+    {
+        var faction = ResolvePlayerFaction(player);
+        var profile = (faction == FlashlightFaction.Zombie ? _config.Zombie : _config.Human).Clone();
+        string? zombieClassName = null;
+
+        if (faction == FlashlightFaction.Zombie)
+        {
+            zombieClassName = TryGetZombieClassName(player);
+
+            if (!string.IsNullOrWhiteSpace(zombieClassName))
+            {
+                var specialConfig = _config.SpecialZombies.FirstOrDefault(group =>
+                    group.Enable
+                    && !string.IsNullOrWhiteSpace(group.Name)
+                    && string.Equals(group.Name.Trim(), zombieClassName, StringComparison.OrdinalIgnoreCase));
+
+                specialConfig?.ApplyTo(profile);
+            }
+        }
+
+        return new ResolvedFlashlightProfile(profile, faction, zombieClassName);
+    }
+
+    private FlashlightFaction ResolvePlayerFaction(IPlayer player)
+    {
+        if (TryIsZombie(player, out var isZombie))
+        {
+            return isZombie ? FlashlightFaction.Zombie : FlashlightFaction.Human;
+        }
+
+        if (player.Controller is null || !player.Controller.IsValid)
+        {
+            return FlashlightFaction.Unknown;
+        }
+
+        return player.Controller.TeamNum switch
+        {
+            (int)Team.CT => FlashlightFaction.Human,
+            (int)Team.T => FlashlightFaction.Zombie,
+            _ => FlashlightFaction.Unknown
+        };
+    }
+
+    private bool TryIsZombie(IPlayer player, out bool isZombie)
+    {
+        isZombie = false;
+        var zpApi = _zpApi;
+        if (zpApi is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            isZombie = zpApi.HZP_IsZombie(player.PlayerID);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private string? TryGetZombieClassName(IPlayer player)
+    {
+        var zpApi = _zpApi;
+        if (zpApi is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var className = zpApi.HZP_GetZombieClassname(player);
+            return string.IsNullOrWhiteSpace(className) ? null : className.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetProfileDisabledMessage(FlashlightFaction faction)
+    {
+        return faction == FlashlightFaction.Zombie
+            ? "Zombie flashlight is disabled in the config."
+            : "Human flashlight is disabled in the config.";
+    }
+
+    private static int GetProfileHash(HZP_Flashlight_ProfileConfig profile)
+    {
+        var hash = new HashCode();
+        hash.Add(profile.Enable);
+        hash.Add(profile.Brightness);
+        hash.Add(profile.Distance);
+        hash.Add(profile.AttachmentDistance);
+        hash.Add(profile.FovOrConeAngle);
+        hash.Add(profile.Shadows);
+        hash.Add(profile.Attachment);
+        hash.Add(profile.ColorR);
+        hash.Add(profile.ColorG);
+        hash.Add(profile.ColorB);
+        hash.Add(profile.ColorA);
+        hash.Add(profile.VisibleToTeammates);
+        return hash.ToHashCode();
+    }
+
+    private static CEntityKeyValues CreateFlashlightKeyValues()
+    {
+        var entityKv = new CEntityKeyValues();
+        entityKv.SetString("lightcookie", FlashlightCookiePath);
+        return entityKv;
+    }
+
+    private bool TryGetTrackedLightEntity(FlashlightPlayerState state, out CBarnLight entity)
+    {
+        entity = null!;
+
+        if (!state.LightEntityIndex.HasValue)
+        {
+            return false;
+        }
+
+        try
+        {
+            var trackedEntity = _core.EntitySystem.GetEntityByIndex<CBarnLight>(state.LightEntityIndex.Value);
+            if (trackedEntity is null || !trackedEntity.IsValid)
+            {
+                state.LightEntityIndex = null;
+                state.LightDesignerName = null;
+                state.ActiveProfileHash = null;
+                return false;
+            }
+
+            entity = trackedEntity;
+            return true;
+        }
+        catch
+        {
+            state.LightEntityIndex = null;
+            state.LightDesignerName = null;
+            state.ActiveProfileHash = null;
+            return false;
+        }
+    }
+
+    private void DestroyLightEntity(FlashlightPlayerState state)
+    {
+        if (!TryGetTrackedLightEntity(state, out var entity))
+        {
+            state.LightEntityIndex = null;
+            state.LightDesignerName = null;
+            state.ActiveProfileHash = null;
+            return;
+        }
+
+        TryDestroyEntity(entity);
+        state.LightEntityIndex = null;
+        state.LightDesignerName = null;
+        state.ActiveProfileHash = null;
+    }
+
+    private static void TryDestroyEntity(CEntityInstance entity)
+    {
+        if (entity is null || !entity.IsValid)
+        {
+            return;
+        }
+
+        try
+        {
+            entity.Despawn();
+            return;
+        }
+        catch
+        {
+        }
+
+        _ = TryAcceptInput(entity, "Kill", string.Empty);
+    }
+
+    private void ConfigureLightEntity(CBarnLight light, HZP_Flashlight_ProfileConfig profile)
+    {
+        light.Enabled = false;
+        light.EnabledUpdated();
+
+        light.ColorMode = 0;
+        light.ColorModeUpdated();
+
+        light.Color = ResolveConfiguredColor(profile);
+        light.ColorUpdated();
+
+        light.Brightness = profile.Brightness;
+        light.BrightnessUpdated();
+
+        light.BrightnessScale = 1.0f;
+        light.BrightnessScaleUpdated();
+
+        light.Range = profile.Distance;
+        light.RangeUpdated();
+
+        light.SoftX = BarnSoftX;
+        light.SoftXUpdated();
+
+        light.SoftY = BarnSoftY;
+        light.SoftYUpdated();
+
+        light.Skirt = BarnSkirt;
+        light.SkirtUpdated();
+
+        light.SkirtNear = BarnSkirtNear;
+        light.SkirtNearUpdated();
+
+        // CS2Fixes uses (angle, angle, 0.02f) for the barn-light cone vector.
+        light.SizeParams = new Vector(profile.FovOrConeAngle, profile.FovOrConeAngle, BarnSizeExponent);
+        light.SizeParamsUpdated();
+
+        light.CastShadows = profile.Shadows ? 1 : 0;
+        light.CastShadowsUpdated();
+
+        light.DirectLight = DirectLightMode;
+        light.DirectLightUpdated();
+    }
+
+    private static Color ResolveConfiguredColor(HZP_Flashlight_ProfileConfig profile)
+    {
+        return new Color(
+            Math.Clamp(profile.ColorR, 0, 255),
+            Math.Clamp(profile.ColorG, 0, 255),
+            Math.Clamp(profile.ColorB, 0, 255),
+            Math.Clamp(profile.ColorA, 0, 255));
+    }
+
+    private void ApplyTransmitPolicy(CEntityInstance entity, IPlayer owner, ResolvedFlashlightProfile resolvedProfile)
+    {
+        _ = TrySetTransmitState(entity, false, null);
+
+        foreach (var viewer in _core.PlayerManager.GetAllValidPlayers())
+        {
+            if (viewer is null || !viewer.IsValid || viewer.PlayerID < 0)
+            {
+                continue;
+            }
+
+            var visible = CanViewerSeeFlashlight(owner, viewer, resolvedProfile);
+            _ = TrySetTransmitState(entity, visible, viewer.PlayerID);
+        }
+    }
+
+    private bool CanViewerSeeFlashlight(IPlayer owner, IPlayer viewer, ResolvedFlashlightProfile resolvedProfile)
+    {
+        if (!viewer.IsValid)
+        {
+            return false;
+        }
+
+        if (viewer.PlayerID == owner.PlayerID)
+        {
+            return true;
+        }
+
+        if (!resolvedProfile.Profile.VisibleToTeammates)
+        {
+            return false;
+        }
+
+        var viewerFaction = ResolvePlayerFaction(viewer);
+        if (resolvedProfile.Faction != FlashlightFaction.Unknown && viewerFaction != FlashlightFaction.Unknown)
+        {
+            return resolvedProfile.Faction == viewerFaction;
+        }
+
+        return ArePlayersOnSamePlayableTeam(owner, viewer);
+    }
+
+    private static bool ArePlayersOnSamePlayableTeam(IPlayer left, IPlayer right)
+    {
+        if (left.Controller is null || !left.Controller.IsValid || right.Controller is null || !right.Controller.IsValid)
+        {
+            return false;
+        }
+
+        var leftTeam = left.Controller.TeamNum;
+        var rightTeam = right.Controller.TeamNum;
+
+        if (!IsPlayableTeam(leftTeam) || !IsPlayableTeam(rightTeam))
+        {
+            return false;
+        }
+
+        return leftTeam == rightTeam;
+    }
+
+    private static bool IsPlayableTeam(int teamNum)
+    {
+        return teamNum == (int)Team.CT || teamNum == (int)Team.T;
+    }
+
+    private void AttachLightToPawn(CBarnLight light, CCSPlayerPawn pawn, HZP_Flashlight_ProfileConfig profile)
+    {
+        var transform = ResolveAttachmentTransform(pawn, profile);
+
+        _ = TryAcceptInput(light, "ClearParent", string.Empty);
+        light.Teleport(transform.Position, transform.Angles, null);
+
+        _ = TryAcceptInput(light, "SetParent", "!activator", pawn, light);
+
+        if (!string.IsNullOrWhiteSpace(profile.Attachment))
+        {
+            _ = TryAcceptInput(light, "SetParentAttachmentMaintainOffset", profile.Attachment, pawn, light);
+        }
+    }
+
+    private static void EnableLight(CBarnLight light)
+    {
+        if (TryAcceptInput(light, "Enable", string.Empty))
+        {
+            return;
+        }
+
+        light.Enabled = true;
+        light.EnabledUpdated();
+    }
+
+    private static FlashlightTransform ResolveAttachmentTransform(CCSPlayerPawn pawn, HZP_Flashlight_ProfileConfig profile)
+    {
+        var position = pawn.AbsOrigin ?? Vector.Zero;
+        var scale = 1.0f;
+
+        var sceneNode = pawn.CBodyComponent?.SceneNode;
+        if (sceneNode is not null)
+        {
+            scale = sceneNode.Scale;
+        }
+
+        position += new Vector(0.0f, 0.0f, 64.0f * scale);
+
+        var angles = pawn.EyeAngles;
+        angles.ToDirectionVectors(out var forward, out _, out _);
+        position += forward * (profile.AttachmentDistance * scale);
+
+        return new FlashlightTransform(position, angles);
+    }
+
+    private static bool TryAcceptInput<T>(
+        CEntityInstance entity,
+        string input,
+        T value,
+        CEntityInstance? activator = null,
+        CEntityInstance? caller = null)
+    {
+        try
+        {
+            entity.AcceptInput(input, value, activator, caller);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TrySetTransmitState(CEntityInstance entity, bool visible, int? playerId)
+    {
+        var cache = playerId.HasValue ? SetTransmitTwoArgCache : SetTransmitOneArgCache;
+        var expectedParameterCount = playerId.HasValue ? 2 : 1;
+        var method = GetCachedMethod(cache, entity.GetType(), expectedParameterCount);
+
+        if (method is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (playerId.HasValue && method.GetParameters().Length == 2)
+            {
+                method.Invoke(entity, [visible, playerId.Value]);
+                return true;
+            }
+
+            if (!playerId.HasValue && method.GetParameters().Length == 1)
+            {
+                method.Invoke(entity, [visible]);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static MethodInfo? GetCachedMethod(Dictionary<Type, MethodInfo?> cache, Type type, int parameterCount)
+    {
+        if (cache.TryGetValue(type, out var cachedMethod))
+        {
+            return cachedMethod;
+        }
+
+        cachedMethod = type
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .FirstOrDefault(method => method.Name == "SetTransmitState" && method.GetParameters().Length == parameterCount);
+
+        cache[type] = cachedMethod;
+        return cachedMethod;
+    }
+
+    private bool TryGetConnectedPlayer(IPlayer? player, out IPlayer connectedPlayer)
+    {
+        connectedPlayer = null!;
+
+        if (player is null || !player.IsValid || player.PlayerID < 0)
+        {
+            return false;
+        }
+
+        if (!_config.AllowBots && player.IsFakeClient)
+        {
+            return false;
+        }
+
+        if (player.Controller is null || !player.Controller.IsValid)
+        {
+            return false;
+        }
+
+        connectedPlayer = player;
+        return true;
+    }
+
+    private static bool TryGetUsablePawn(IPlayer player, bool requireAlive, out CCSPlayerPawn pawn)
+    {
+        pawn = null!;
+
+        if (player.Controller is null || !player.Controller.IsValid)
+        {
+            return false;
+        }
+
+        if (requireAlive && !player.IsAlive)
+        {
+            return false;
+        }
+
+        if (player.PlayerPawn is null || !player.PlayerPawn.IsValid)
+        {
+            return false;
+        }
+
+        pawn = player.PlayerPawn;
+        return true;
+    }
+
+    private bool TryResolvePlayerBySession(ulong sessionId, out IPlayer player)
+    {
+        player = null!;
+        var currentPlayer = _core.PlayerManager.GetPlayerFromSessionId(sessionId);
+
+        if (currentPlayer is null || !currentPlayer.IsValid)
+        {
+            return false;
+        }
+
+        if (currentPlayer.SessionId != sessionId)
+        {
+            return false;
+        }
+
+        player = currentPlayer;
+        return true;
+    }
+    
+    private readonly record struct FlashlightTransform(Vector Position, QAngle Angles);
+    private readonly record struct ResolvedFlashlightProfile(
+        HZP_Flashlight_ProfileConfig Profile,
+        FlashlightFaction Faction,
+        string? ZombieClassName);
+
+    private enum FlashlightFaction
+    {
+        Unknown = 0,
+        Human = 1,
+        Zombie = 2
+    }
+
+    private sealed class FlashlightPlayerState
+    {
+        public required ulong SessionId { get; init; }
+        public int PlayerId { get; set; }
+        public bool Enabled { get; set; }
+        public float LastToggleTime { get; set; }
+        public float NextRetryTime { get; set; }
+        public uint? LightEntityIndex { get; set; }
+        public string? LightDesignerName { get; set; }
+        public int? ActiveProfileHash { get; set; }
+    }
+}
