@@ -17,7 +17,9 @@
 A **SwiftlyS2** plugin for CS2 flashlight effects.  
 It supports separate human/zombie lighting profiles, special-zombie overrides, key + command dual entry, and production-ready lifecycle cleanup.
 
-## Promotion
+---
+
+## Credit : 
 
 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
   <span>Powered by yumiai :</span>
@@ -26,6 +28,24 @@ It supports separate human/zombie lighting profiles, special-zombie overrides, k
   </a>
   <span>(AI model provider)</span>
 </div>
+
+<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+  <span>SwiftlyS2-Toolkit & agents By laoshi :</span>
+  <a href="https://github.com/2oaJ">
+    <img src="https://github.com/user-attachments/assets/2da5deb4-2be9-4269-8f8e-df0029bb7c91" width="50" alt="yumiai logo">
+  </a>
+  <span>(swiftlys2 Skills & agents)</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+  <span>SwiftlyS2-mdwiki By LynchMus :</span>
+  <a href="https://github.com/himenekocn/sw2-mdwiki">
+    <img src="https://github.com/user-attachments/assets/c7f3b4ca-629a-4df9-a405-3f1a7507ecf2" width="50" alt="yumiai logo">
+  </a>
+  <span>(swiftlys2 mdwiki)</span>
+</div>
+
+---
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z31PY52N)
 
