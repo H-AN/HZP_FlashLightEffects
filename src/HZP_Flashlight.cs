@@ -19,7 +19,7 @@ namespace HZP_Flashlight;
     Version = "1.0.0",
     Name = "HZP_Flashlight",
     Author = "H-AN",
-    Description = "Player-toggle flashlight support with ZP-aware human/zombie profiles."
+    Description = "允许人类玩家使用手电筒,丧尸玩家视觉特效/Human players are allowed to use flashlights; zombie players have visual effects."
 )]
 public sealed class HZP_Flashlight : BasePlugin
 {
