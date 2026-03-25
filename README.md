@@ -17,7 +17,9 @@
 基于 **SwiftlyS2** 的 CS2 手电筒插件。  
 支持人类/僵尸分组光效、自定义特感僵尸光效、按键与命令双入口、以及完整生命周期清理，适合直接用于上线服。
 
-## 作者推广
+---
+
+## 特别感谢 : 
 
 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
   <span>技术支持 / Powered by yumiai :</span>
@@ -27,6 +29,23 @@
   <span>(AI 模型服务 / AI model provider)</span>
 </div>
 
+<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+  <span>SwiftlyS2-Toolkit & agents By laoshi :</span>
+  <a href="https://github.com/2oaJ">
+    <img src="https://github.com/user-attachments/assets/2da5deb4-2be9-4269-8f8e-df0029bb7c91" width="50" alt="yumiai logo">
+  </a>
+  <span>(开源swiftlys2 Skills 和 agents)</span>
+</div>
+
+<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+  <span>SwiftlyS2-mdwiki By LynchMus :</span>
+  <a href="https://github.com/himenekocn/sw2-mdwiki">
+    <img src="https://github.com/user-attachments/assets/c7f3b4ca-629a-4df9-a405-3f1a7507ecf2" width="50" alt="yumiai logo">
+  </a>
+  <span>(开源swiftlys2 mdwiki)</span>
+</div>
+
+---
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z31PY52N)
 
 ---
