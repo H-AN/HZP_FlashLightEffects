@@ -29,16 +29,12 @@ public sealed class HZP_Flashlight : BasePlugin
     private const string BindFallbackCommand = "swiftly_flashlight_toggle";
     private const string ZombiePlagueInterfaceName = "HanZombiePlague";
 
-    private readonly ILogger<HZP_Flashlight> _logger;
-
     private ServiceProvider? _serviceProvider;
-    private IOptionsMonitor<HZP_Flashlight_Config>? _configMonitor;
     private HZP_Flashlight_Service? _service;
     private IHanZombiePlagueAPI? _zpApi;
 
     public HZP_Flashlight(ISwiftlyCore core) : base(core)
     {
-        _logger = core.LoggerFactory.CreateLogger<HZP_Flashlight>();
     }
 
     public override void UseSharedInterface(IInterfaceManager interfaceManager)
@@ -65,10 +61,10 @@ public sealed class HZP_Flashlight : BasePlugin
             .BindConfiguration(ConfigSectionName);
 
         _serviceProvider = services.BuildServiceProvider();
-        _configMonitor = _serviceProvider.GetRequiredService<IOptionsMonitor<HZP_Flashlight_Config>>();
+        var configMonitor = _serviceProvider.GetRequiredService<IOptionsMonitor<HZP_Flashlight_Config>>();
         _service = new HZP_Flashlight_Service(Core, Core.LoggerFactory.CreateLogger<HZP_Flashlight_Service>());
         _service.SetZombiePlagueApi(_zpApi);
-        _service.UpdateConfig(_configMonitor.CurrentValue);
+        _service.UpdateConfig(configMonitor.CurrentValue);
 
         Core.Event.OnClientKeyStateChanged += OnClientKeyStateChanged;
         Core.Event.OnClientDisconnected += OnClientDisconnected;
@@ -79,8 +75,6 @@ public sealed class HZP_Flashlight : BasePlugin
         Core.Command.RegisterCommand(PrimaryCommand, HandleFlashlightToggleCommand, true);
         Core.Command.RegisterCommand(BindFallbackCommand, HandleFlashlightToggleCommand, true);
 
-        _logger.LogInformation("HZP_Flashlight loaded. hotReload={HotReload}", hotReload);
-        LogCurrentConfig("load");
     }
 
     public override void Unload()
@@ -99,10 +93,7 @@ public sealed class HZP_Flashlight : BasePlugin
 
         _serviceProvider?.Dispose();
         _serviceProvider = null;
-        _configMonitor = null;
         _service = null;
-
-        _logger.LogInformation("HZP_Flashlight unloaded.");
     }
 
     [GameEventHandler(HookMode.Post)]
@@ -146,13 +137,11 @@ public sealed class HZP_Flashlight : BasePlugin
     private void OnMapLoad(IOnMapLoadEvent @event)
     {
         _service?.HandleMapLoad();
-        _logger.LogInformation("Map loaded: {MapName}", @event.MapName);
     }
 
     private void OnMapUnload(IOnMapUnloadEvent @event)
     {
         _service?.HandleMapUnload();
-        _logger.LogInformation("Map unloaded.");
     }
 
     private void OnTick()
@@ -264,7 +253,6 @@ public sealed class HZP_Flashlight : BasePlugin
         }
 
         _zpApi.HZP_OnPlayerInfect += OnZombiePlayerInfect;
-        _logger.LogInformation("HZP_Flashlight connected to HanZombiePlague shared API.");
     }
 
     private void DetachZombiePlagueApi()
@@ -278,40 +266,6 @@ public sealed class HZP_Flashlight : BasePlugin
         _zpApi = null;
         _service?.SetZombiePlagueApi(null);
     }
-
-    private void LogCurrentConfig(string reason)
-    {
-        var config = _configMonitor?.CurrentValue;
-        if (config is null)
-        {
-            return;
-        }
-
-        var human = config.Human ?? HZP_Flashlight_ProfileConfig.CreateHumanDefaults();
-        var zombie = config.Zombie ?? HZP_Flashlight_ProfileConfig.CreateZombieDefaults();
-
-        _logger.LogInformation(
-            "HZP_Flashlight config snapshot. Reason={Reason} Enable={Enable} AllowBots={AllowBots} DebounceMs={DebounceMs} HumanEnabled={HumanEnabled} HumanColor={HumanColor} HumanRange={HumanRange} HumanTeamVisible={HumanTeamVisible} ZombieEnabled={ZombieEnabled} ZombieColor={ZombieColor} ZombieRange={ZombieRange} ZombieTeamVisible={ZombieTeamVisible} SpecialZombieCount={SpecialZombieCount}. ConfigAutoReload=Disabled",
-            reason,
-            config.Enable,
-            config.AllowBots,
-            config.ToggleDebounceMs,
-            human.Enable,
-            FormatColor(human),
-            human.Distance,
-            human.VisibleToTeammates,
-            zombie.Enable,
-            FormatColor(zombie),
-            zombie.Distance,
-            zombie.VisibleToTeammates,
-            config.SpecialZombies?.Count ?? 0);
-    }
-
-    private static string FormatColor(HZP_Flashlight_ProfileConfig profile)
-    {
-        return $"{profile.ColorR},{profile.ColorG},{profile.ColorB},{profile.ColorA}";
-    }
-
     private static string GetPlayerDisplayName(IPlayer player)
     {
         if (player.Controller is not null

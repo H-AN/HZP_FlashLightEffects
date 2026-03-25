@@ -1,4 +1,3 @@
-using System.Reflection;
 using HanZombiePlagueS2;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
@@ -21,9 +20,6 @@ public sealed class HZP_Flashlight_Service
     private const float BarnSkirt = 0.5f;
     private const float BarnSkirtNear = 1.0f;
     private const float BarnSizeExponent = 0.02f;
-
-    private static readonly Dictionary<Type, MethodInfo?> SetTransmitOneArgCache = [];
-    private static readonly Dictionary<Type, MethodInfo?> SetTransmitTwoArgCache = [];
 
     private readonly ISwiftlyCore _core;
     private readonly ILogger<HZP_Flashlight_Service> _logger;
@@ -171,11 +167,6 @@ public sealed class HZP_Flashlight_Service
         }
 
         ForceDisableState(state);
-
-        _logger.LogInformation(
-            "Disabled flashlight for infected player {PlayerId}. ZombieClass={ZombieClassName}.",
-            infectedPlayer.PlayerID,
-            string.IsNullOrWhiteSpace(zombieClassName) ? "unknown" : zombieClassName);
     }
 
     public void HandleClientDisconnected(int playerId)
@@ -409,14 +400,6 @@ public sealed class HZP_Flashlight_Service
             state.NextRetryTime = 0.0f;
             state.ActiveProfileHash = GetProfileHash(resolvedProfile.Profile);
 
-            _logger.LogInformation(
-                "Created flashlight entity {EntityIndex} using designer '{DesignerName}' for player {PlayerId}. Faction={Faction} ZombieClass={ZombieClassName}.",
-                light.Index,
-                FlashlightDesignerName,
-                player.PlayerID,
-                resolvedProfile.Faction,
-                resolvedProfile.ZombieClassName ?? "none");
-
             return true;
         }
         catch (Exception ex)
@@ -558,7 +541,10 @@ public sealed class HZP_Flashlight_Service
         try
         {
             var trackedEntity = _core.EntitySystem.GetEntityByIndex<CBarnLight>(state.LightEntityIndex.Value);
-            if (trackedEntity is null || !trackedEntity.IsValid)
+            if (trackedEntity is null
+                || !trackedEntity.IsValid
+                || (!string.IsNullOrWhiteSpace(state.LightDesignerName)
+                    && !string.Equals(trackedEntity.DesignerName, state.LightDesignerName, StringComparison.Ordinal)))
             {
                 state.LightEntityIndex = null;
                 state.LightDesignerName = null;
@@ -668,6 +654,12 @@ public sealed class HZP_Flashlight_Service
     private void ApplyTransmitPolicy(CEntityInstance entity, IPlayer owner, ResolvedFlashlightProfile resolvedProfile)
     {
         _ = TrySetTransmitState(entity, false, null);
+
+        if (!resolvedProfile.Profile.VisibleToTeammates)
+        {
+            _ = TrySetTransmitState(entity, true, owner.PlayerID);
+            return;
+        }
 
         foreach (var viewer in _core.PlayerManager.GetAllValidPlayers())
         {
@@ -796,49 +788,21 @@ public sealed class HZP_Flashlight_Service
 
     private static bool TrySetTransmitState(CEntityInstance entity, bool visible, int? playerId)
     {
-        var cache = playerId.HasValue ? SetTransmitTwoArgCache : SetTransmitOneArgCache;
-        var expectedParameterCount = playerId.HasValue ? 2 : 1;
-        var method = GetCachedMethod(cache, entity.GetType(), expectedParameterCount);
-
-        if (method is null)
-        {
-            return false;
-        }
-
         try
         {
-            if (playerId.HasValue && method.GetParameters().Length == 2)
+            if (playerId.HasValue)
             {
-                method.Invoke(entity, [visible, playerId.Value]);
+                entity.SetTransmitState(visible, playerId.Value);
                 return true;
             }
 
-            if (!playerId.HasValue && method.GetParameters().Length == 1)
-            {
-                method.Invoke(entity, [visible]);
-                return true;
-            }
+            entity.SetTransmitState(visible);
+            return true;
         }
         catch
         {
+            return false;
         }
-
-        return false;
-    }
-
-    private static MethodInfo? GetCachedMethod(Dictionary<Type, MethodInfo?> cache, Type type, int parameterCount)
-    {
-        if (cache.TryGetValue(type, out var cachedMethod))
-        {
-            return cachedMethod;
-        }
-
-        cachedMethod = type
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .FirstOrDefault(method => method.Name == "SetTransmitState" && method.GetParameters().Length == parameterCount);
-
-        cache[type] = cachedMethod;
-        return cachedMethod;
     }
 
     private bool TryGetConnectedPlayer(IPlayer? player, out IPlayer connectedPlayer)
