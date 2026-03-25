@@ -7,6 +7,8 @@
 		<CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<PlatformTarget>x64</PlatformTarget>
+		<OutputPath>$(ProjectDir)..\..\HZP_FlashLightEffects\build\HZP_Flashlight\</OutputPath>
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="SwiftlyS2.CS2" Version="*" />
