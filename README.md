@@ -53,7 +53,7 @@
 ## 功能概览
 
 - 支持按 `F` 键直接切换手电筒。
-- 同时注册命令 `flashlight` 与 `swiftly_flashlight_toggle`（便于 `bind` 回退方案）。
+- 同时注册命令 `flashlight` 与 `forceflash`（便于 `bind` 回退方案）。
 - 普通玩家命令仅影响自己，不允许直接控制其他玩家。
 - 提供独立管理员命令 `flash`，支持模糊名字匹配后强制控制目标玩家。
 - 基于阵营应用不同光照配置：`Human` / `Zombie`。
