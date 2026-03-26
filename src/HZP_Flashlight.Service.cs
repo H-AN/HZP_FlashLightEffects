@@ -797,13 +797,14 @@ public sealed class HZP_Flashlight_Service
         var transform = ResolveAttachmentTransform(pawn, profile);
 
         _ = TryAcceptInput(light, "ClearParent", string.Empty);
+        // Match CS2Fixes: place the flashlight slightly forward once, then let
+        // the attachment preserve that offset without any per-tick updates.
         light.Teleport(transform.Position, transform.Angles, null);
-
         _ = TryAcceptInput(light, "SetParent", "!activator", pawn, light);
 
         if (!string.IsNullOrWhiteSpace(profile.Attachment))
         {
-            _ = TryAcceptInput(light, "SetParentAttachmentMaintainOffset", profile.Attachment, pawn, light);
+            _ = TryAcceptInput(light, "SetParentAttachmentMaintainOffset", profile.Attachment);
         }
     }
 
