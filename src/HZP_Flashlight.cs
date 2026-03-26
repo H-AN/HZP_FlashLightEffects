@@ -16,7 +16,7 @@ namespace HZP_Flashlight;
 
 [PluginMetadata(
     Id = "HZP_Flashlight",
-    Version = "1.0.0",
+    Version = "1.0.1",
     Name = "HZP_Flashlight",
     Author = "H-AN",
     Description = "允许人类玩家使用手电筒,丧尸玩家视觉特效/Human players are allowed to use flashlights; zombie players have visual effects."
